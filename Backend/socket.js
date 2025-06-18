@@ -1,6 +1,7 @@
 const Classroom = require("./models/Classroom.model")
 const joinTimes = {};
 
+
 const setupSocketIO = (io) => {
   io.on("connection", (socket) => {
     socket.on("broadcaster", ({ classroomId, userId }) => {
@@ -64,6 +65,7 @@ const setupSocketIO = (io) => {
     });
   });
 };
+
 
 // This interval will check every minute if a student has reached 30 minutes, and if so, set their credits to 100 + current (negative) credits, only once
 setInterval(async () => {

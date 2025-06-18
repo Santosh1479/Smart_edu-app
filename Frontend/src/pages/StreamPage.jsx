@@ -61,104 +61,128 @@ export default function StreamPage() {
   useEffect(() => {
     if (!userId) return;
 
-    // Cleanup previous connection if any
-    if (pcRef.current) {
-      pcRef.current.close();
-      pcRef.current = null;
-    }
-
+    // --- TEACHER LOGIC ---
     if (isTeacher) {
-      // TEACHER: Capture and stream video
-      let pc;
-      let watcherHandler, answerHandler, iceHandler;
+      const peerConnections = {}; // key: watcherId
+      let localStream;
 
+      // Get teacher's media stream
       navigator.mediaDevices.getUserMedia({ video: true, audio: true }).then((stream) => {
         localStreamRef.current.srcObject = stream;
-        pc = new RTCPeerConnection({
-          iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
-        });
-        pcRef.current = pc;
-        stream.getTracks().forEach((track) => pc.addTrack(track, stream));
+        localStream = stream;
 
-        pc.onicecandidate = (event) => {
-          if (event.candidate) {
-            socket.emit("ice-candidate", { candidate: event.candidate, classroomId, userId });
+        // When a student joins, create a new peer connection for them
+        const watcherHandler = ({ watcherId }) => {
+          const pc = new RTCPeerConnection({
+            iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
+          });
+          peerConnections[watcherId] = pc;
+
+          // Add tracks to this connection
+          localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+
+          // ICE candidates to student
+          pc.onicecandidate = event => {
+            if (event.candidate) {
+              socket.emit("ice-candidate", {
+                candidate: event.candidate,
+                classroomId,
+                to: watcherId,
+                userId
+              });
+            }
+          };
+
+          // Create and send offer
+          pc.createOffer()
+            .then(offer => pc.setLocalDescription(offer))
+            .then(() => {
+              socket.emit("offer", {
+                offer: pc.localDescription,
+                classroomId,
+                to: watcherId
+              });
+            });
+        };
+
+        // Receive answer from student
+        const answerHandler = ({ answer, from }) => {
+          const pc = peerConnections[from];
+          if (pc) {
+            pc.setRemoteDescription(new RTCSessionDescription(answer));
           }
         };
 
-        // When a student joins, create and send an offer
-        watcherHandler = async ({ watcherId }) => {
-          const offer = await pc.createOffer();
-          await pc.setLocalDescription(offer);
-          socket.emit("offer", { offer, classroomId, to: watcherId });
-        };
-        socket.on("watcher", watcherHandler);
-
-        // Receive answer from student
-        answerHandler = async ({ answer, from }) => {
-          await pc.setRemoteDescription(new RTCSessionDescription(answer));
-        };
-        socket.on("answer", answerHandler);
-
         // ICE from student
-        iceHandler = async ({ candidate, from }) => {
-          try {
-            await pc.addIceCandidate(new RTCIceCandidate(candidate));
-          } catch (e) {}
+        const iceHandler = ({ candidate, from }) => {
+          const pc = peerConnections[from];
+          if (pc && candidate) {
+            pc.addIceCandidate(new RTCIceCandidate(candidate));
+          }
         };
+
+        socket.on("watcher", watcherHandler);
+        socket.on("answer", answerHandler);
         socket.on("ice-candidate", iceHandler);
 
         socket.emit("broadcaster", { classroomId, userId });
-      });
 
-      // Cleanup
-      return () => {
-        if (pc) pc.close();
-        socket.off("watcher", watcherHandler);
-        socket.off("answer", answerHandler);
-        socket.off("ice-candidate", iceHandler);
-      };
-    } else {
-      // STUDENT: Only view stream
+        // Cleanup
+        return () => {
+          Object.values(peerConnections).forEach(pc => pc.close());
+          socket.off("watcher", watcherHandler);
+          socket.off("answer", answerHandler);
+          socket.off("ice-candidate", iceHandler);
+        };
+      });
+    }
+    // --- STUDENT LOGIC ---
+    else {
       const pc = new RTCPeerConnection({
         iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
       });
       pcRef.current = pc;
 
+      // ICE candidates to teacher
+      pc.onicecandidate = (event) => {
+        if (event.candidate) {
+          socket.emit("ice-candidate", {
+            candidate: event.candidate,
+            classroomId,
+            userId
+          });
+        }
+      };
+
+      // When receiving offer from teacher
+      const offerHandler = ({ offer, from }) => {
+        pc.setRemoteDescription(new RTCSessionDescription(offer))
+          .then(() => pc.createAnswer())
+          .then(answer => pc.setLocalDescription(answer))
+          .then(() => {
+            socket.emit("answer", {
+              answer: pc.localDescription,
+              classroomId,
+              to: from
+            });
+          });
+      };
+
+      // When receiving ICE candidate from teacher
+      const iceHandler = ({ candidate }) => {
+        if (candidate) {
+          pc.addIceCandidate(new RTCIceCandidate(candidate));
+        }
+      };
+
+      // When stream is received
       pc.ontrack = (event) => {
         if (videoRef.current) {
           videoRef.current.srcObject = event.streams[0];
         }
       };
-      pc.onicecandidate = (event) => {
-        if (event.candidate) {
-          socket.emit("ice-candidate", { candidate: event.candidate, classroomId, userId });
-        }
-      };
 
-      // Receive offer from teacher, send answer
-      const offerHandler = async ({ offer, from }) => {
-        if (pc.signalingState !== "stable" || negotiatingRef.current) {
-          return;
-        }
-        negotiatingRef.current = true;
-        try {
-          await pc.setRemoteDescription(new RTCSessionDescription(offer));
-          const answer = await pc.createAnswer();
-          await pc.setLocalDescription(answer);
-          socket.emit("answer", { answer, classroomId, to: from });
-        } finally {
-          negotiatingRef.current = false;
-        }
-      };
       socket.on("offer", offerHandler);
-
-      // ICE from teacher
-      const iceHandler = async ({ candidate, from }) => {
-        try {
-          await pc.addIceCandidate(new RTCIceCandidate(candidate));
-        } catch (e) {}
-      };
       socket.on("ice-candidate", iceHandler);
 
       // Announce as watcher
@@ -196,27 +220,14 @@ export default function StreamPage() {
           });
           const data = await res.json();
           if (data.state) {
-            setEmotionHistory((prev) => {
-              const newHistory = [...prev, data.state].slice(-5);
-              if (newHistory.length === 5 && newHistory.every((e) => e === newHistory[0])) {
-                if (confirmedEmotion !== newHistory[0]) {
-                  setConfirmedEmotion(newHistory[0]);
-                  setStudentEmotion(newHistory[0]);
-                  if (["confused", "bored", "looking away"].includes(newHistory[0])) {
-                    socket.emit("student-emotion", {
-                      classroomId,
-                      userId,
-                      name: userName,
-                      emotion: newHistory[0],
-                    });
-                  }
-                }
-              }
-              return newHistory;
-            });
+            setStudentEmotion(data.state);
+          } else if (data.error) {
+            setStudentEmotion("Error: " + data.error);
+          } else {
+            setStudentEmotion("Unknown error");
           }
         } catch (e) {
-          setStudentEmotion("Error");
+          setStudentEmotion("Network error");
         }
       }, "image/jpeg");
     };
@@ -274,7 +285,7 @@ export default function StreamPage() {
           </div>
         ) : (
           <div style={{ background: "#222", color: "#fff", borderRadius: "8px", padding: "12px", minHeight: "60px" }}>
-            {confirmedEmotion ? `Detected Emotion: ${confirmedEmotion}` : "Detecting..."}
+            {studentEmotion ? `Detected Emotion: ${studentEmotion}` : "Detecting..."}
           </div>
         )}
       </div>
