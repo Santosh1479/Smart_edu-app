@@ -2,5 +2,6 @@ node_modules/
 *.env
 *
 
-# !AI/
-# !AI/**
+# Track the AI/need.py file explicitly
+!AI/
+!AI/need.py
