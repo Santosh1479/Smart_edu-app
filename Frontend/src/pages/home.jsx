@@ -89,20 +89,29 @@ const Home = () => {
 
   // Conduct quiz for a selected topic
   const handleTopicClick = async (topic) => {
-    const choice = prompt("Enter 'quiz' to generate a quiz or 'content' to view content:");
-  
-    if (!choice || (choice.toLowerCase() !== 'quiz' && choice.toLowerCase() !== 'content')) {
+    const choice = prompt(
+      "Enter 'quiz' to generate a quiz or 'content' to view content:"
+    );
+
+    if (
+      !choice ||
+      (choice.toLowerCase() !== "quiz" && choice.toLowerCase() !== "content")
+    ) {
       alert("Invalid choice. Please enter 'quiz' or 'content'.");
       return;
     }
-  
+
     try {
-      const res = await axios.post(`http://127.0.0.1:5000/generate/${topic}`, { choice }, {
-        headers: {
-          'Content-Type': 'application/json'
+      const res = await axios.post(
+        `http://127.0.0.1:5000/generate/${topic}`,
+        { choice },
+        {
+          headers: {
+            "Content-Type": "application/json",
+          },
         }
-      });
-      if (choice.toLowerCase() === 'quiz') {
+      );
+      if (choice.toLowerCase() === "quiz") {
         const quiz = res.data.quiz;
         let score = 0;
         for (const question of quiz) {
@@ -114,7 +123,7 @@ const Home = () => {
           }
         }
         alert(`Quiz completed! Your score: ${score}/${quiz.length}`);
-      } else if (choice.toLowerCase() === 'content') {
+      } else if (choice.toLowerCase() === "content") {
         const content = res.data.content;
         alert(`Content for topic "${topic}":\n\n${content}`);
       }
@@ -149,7 +158,7 @@ const Home = () => {
   return (
     <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-[#1d0036] to-[#6A29FF] text-white px-4">
       {/* Header Section */}
-      <div className="p-4 bg-white/10 backdrop-blur-lg border border-white/20 shadow-md rounded-lg w-full max-w-4xl text-center">
+      <div className="p-4 mt-20 backdrop-blur-lg shadow-md rounded-lg w-full max-w-4xl text-center">
         <h1 className="text-4xl font-bold drop-shadow-lg">
           Welcome to Your Dashboard
         </h1>
@@ -201,20 +210,19 @@ const Home = () => {
           </p>
         )}
       </div>
-
-      <button
-        onClick={handleStudy}
-        className="bg-violet-600 hover:bg-violet-700 text-white px-4 py-2 rounded-lg font-semibold transition-all duration-300 shadow-lg mt-6"
-      >
-        Study
-      </button>
+      <div className="p-4 mt-6 pb-8 bg-white/10 backdrop-blur-lg border border-white/20 shadow-md rounded-lg w-full max-w-4xl flex justify-center items-center"> 
+        <button
+          onClick={handleStudy}
+          className="bg-violet-600 hover:bg-violet-700 text-white px-4 py-2 rounded-lg font-semibold transition-all duration-300 shadow-lg mt-6"
+        >
+          Study
+        </button>
+      </div>
 
       {/* Subjects Section */}
       {showSubjects && (
         <div className="p-8">
-          <h2 className="text-2xl font-semibold text-white mb-6">
-            Subjects:
-          </h2>
+          <h2 className="text-2xl font-semibold text-white mb-6">Subjects:</h2>
           <div className="gap-4">
             {subjects.map((subject) => (
               <div
